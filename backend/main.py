@@ -4,10 +4,11 @@ import string
 import random
 import logging
 import base64
-from datetime import datetime, timedelta, date, timezone
+from datetime import datetime, timedelta, date
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Tuple
 from pathlib import Path
+import shutil
 import zipfile
 from collections import defaultdict
 
@@ -31,24 +32,24 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 
-# Load environment variables
+# Загрузка переменных окружения
 load_dotenv()
 
-# Configure logging
+# Настройка логгирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Define paths
+# Определяем пути
 current_dir = Path(__file__).resolve().parent
 static_dir = current_dir / "static"
 uploads_dir = current_dir / "uploads"
-os.makedirs(uploads_dir, exist_ok=True)  # Create upload directory
+os.makedirs(uploads_dir, exist_ok=True)  # Создаем директорию для загрузок
 
-# Create base class for models
+# Создаем базовый класс для моделей
 Base = declarative_base()
 
 
-# Database models
+# Модели базы данных
 class User(Base):
     __tablename__ = "users"
     user_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -62,6 +63,7 @@ class User(Base):
     devices = relationship("Device", back_populates="user")
     notifications = relationship("Notification", back_populates="user")
     statistics = relationship("Statistic", back_populates="user")
+    schedules = relationship("Schedule", back_populates="user")
     categories = relationship("Category", back_populates="user")
     screenshots = relationship("Screenshot", back_populates="user")
     screen_times = relationship("ScreenTime", back_populates="user")
@@ -77,8 +79,8 @@ class Device(Base):
     osVersion = Column(String)
     isBlocked = Column(Boolean, default=False)
     tetheredAt = Column(DateTime, default=datetime.utcnow)
-    heartbeat = Column(DateTime, default=datetime.utcnow)  # Added heartbeat field
     user = relationship("User", back_populates="devices")
+    schedules = relationship("Schedule", back_populates="device")
     statistics = relationship("Statistic", back_populates="device")
     screenshots = relationship("Screenshot", back_populates="device")
     screen_times = relationship("ScreenTime", back_populates="device")
@@ -91,6 +93,22 @@ class TetheringCode(Base):
     user_id = Column(String, ForeignKey('users.user_id'), nullable=False)
     expiredAt = Column(DateTime, nullable=False)
     used = Column(Boolean, default=False)
+
+
+class Schedule(Base):
+    __tablename__ = "schedules"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey('users.user_id'), nullable=False)
+    device_id = Column(String, ForeignKey('devices.device_id'), nullable=False)
+    name = Column(String, nullable=False)
+    days = Column(JSON, nullable=False)  # List of days: ["mon", "tue", ...]
+    start_time = Column(String, nullable=False)  # "08:00"
+    end_time = Column(String, nullable=False)  # "16:00"
+    type = Column(String, default="full")  # "full", "app", "web"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    user = relationship("User", back_populates="schedules")
+    device = relationship("Device", back_populates="schedules")
 
 
 class Notification(Base):
@@ -137,7 +155,7 @@ class Screenshot(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, ForeignKey('users.user_id'), nullable=False)
     device_id = Column(String, ForeignKey('devices.device_id'), nullable=False)
-    image = Column(String, nullable=False)  # File path
+    image = Column(String, nullable=False)  # Путь к файлу
     category = Column(String)
     transaction_id = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -153,7 +171,6 @@ class ScreenTime(Base):
     limit = Column(Integer, nullable=False)  # in minutes
     schedule_start = Column(String)  # "08:00"
     schedule_end = Column(String)  # "22:00"
-    app_name = Column(String)  # Added app_name field
     created_at = Column(DateTime, default=datetime.utcnow)
     user = relationship("User", back_populates="screen_times")
     device = relationship("Device", back_populates="screen_times")
@@ -175,16 +192,16 @@ class ScreenTimeLog(Base):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifecycle context"""
+    """Контекст жизненного цикла приложения"""
     await init_db()
     yield
 
 
-# Create FastAPI instance
+# Создаем экземпляр FastAPI
 app = FastAPI(lifespan=lifespan)
 
 
-# Middleware for request logging
+# Middleware для логирования запросов
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     logger.info(f"Request: {request.method} {request.url}")
@@ -192,7 +209,7 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-# Configure CORS
+# Настраиваем CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -201,7 +218,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Security configuration
+# Конфигурация безопасности
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "fallback_secret_key")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 10
@@ -210,143 +227,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer()
 
 
-# Helper functions
-def get_default_category(db: Session, user_id: str) -> Optional[Category]:
-    """Gets the default category for the user"""
-    return db.query(Category).filter(
-        Category.user_id == user_id,
-        func.lower(Category.name) == "uncategorized"
-    ).first()
-
-
-def analyze_image_and_get_category(image_data: bytes, user_id: str, db: Session) -> Tuple[Optional[Category], float]:
-    """
-    Analyzes image and returns category with confidence level
-    with improved error handling and category creation
-    """
-    try:
-        # Get user's existing categories
-        categories = db.query(Category).filter(Category.user_id == user_id).all()
-        categories_names = [c.name for c in categories]
-
-        # Analyze image with AI
-        report = moderate_screenshot(image_data, categories_names)
-
-        # Log AI response for debugging
-        logger.info(f"AI report: {report}")
-
-        # Handle AI errors
-        if "error" in report:
-            logger.error(f"AI error: {report['error']}")
-            # Return default category
-            return get_default_category(db, user_id), 0.0
-
-        if "category" in report:
-            category_name = report["category"]
-            confidence = report.get("confidence", 0.0)
-
-            # Find existing category by name
-            category = next((c for c in categories if c.name == category_name), None)
-
-            if not category:
-                # Check if category was created in parallel
-                category = db.query(Category).filter(
-                    Category.user_id == user_id,
-                    Category.name == category_name
-                ).first()
-
-            if not category:
-                # Create new category if not found
-                try:
-                    category = Category(
-                        user_id=user_id,
-                        name=category_name,
-                        label=category_name.capitalize(),
-                        description="Automatically created category",
-                        restricted=False,
-                        icon="📱",
-                        time_limit=0
-                    )
-                    db.add(category)
-                    db.commit()
-                    db.refresh(category)
-                    logger.info(f"Created new category: {category_name}")
-                except IntegrityError:
-                    db.rollback()
-                    # Category might have been created in parallel
-                    category = db.query(Category).filter(
-                        Category.user_id == user_id,
-                        Category.name == category_name
-                    ).first()
-                    if category:
-                        logger.info(f"Found existing category after conflict: {category_name}")
-                    else:
-                        logger.error(f"Error creating category: {category_name}")
-
-            return category, confidence
-
-    except Exception as e:
-        logger.error(f"Image analysis error: {str(e)}", exc_info=True)
-
-    # Return default category for any errors
-    default_category = get_default_category(db, user_id)
-    return default_category, 0.0
-
-
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> str:
-    """Verifies JWT token"""
-    try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token payload"
-            )
-        return user_id
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired"
-        )
-    except jwt.PyJWTError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid or missing token: {str(e)}"
-        )
-
-
-def generate_code() -> str:
-    """Generates random tethering code"""
-    chars = string.ascii_uppercase + string.digits
-    return ''.join(random.choice(chars) for _ in range(5))
-
-
-def minutes_to_hh_mm(minutes: int) -> str:
-    """Converts minutes to 'Xh Ym' format"""
-    hours = minutes // 60
-    mins = minutes % 60
-    return f"{hours}h {mins}m" if hours > 0 else f"{mins}m"
-
-
-# Initialize database
-async def init_db():
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./familyguard.db")
-    engine = create_engine(DATABASE_URL)
-    Base.metadata.create_all(bind=engine)
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    app.state.db = SessionLocal()
-    logger.info("Database initialized")
-
-
-def get_db():
-    return app.state.db
-
-
-# Pydantic models
+# Модели данных Pydantic
 class UserCreate(BaseModel):
     firstName: str
     lastName: str
@@ -430,6 +311,28 @@ class LoginViaTokenData(BaseModel):
 class SuccessResponse(BaseModel):
     status: str = "success"
     data: dict
+
+
+class ScheduleCreate(BaseModel):
+    device_id: str
+    name: str
+    days: List[str]
+    start_time: str
+    end_time: str
+    type: str = "full"
+
+
+class ScheduleResponse(BaseModel):
+    id: str
+    device_id: str
+    device_name: str
+    name: str
+    days: List[str]
+    start_time: str
+    end_time: str
+    type: str
+    is_active: bool
+    created_at: str
 
 
 class NotificationResponse(BaseModel):
@@ -521,8 +424,8 @@ class WebDeviceCreate(BaseModel):
 
 class CategoryCreate(BaseModel):
     name: str
-    label: Optional[str] = None
-    description: Optional[str] = None
+    label: str
+    description: str
     restricted: bool
     icon: str
     time_limit: int
@@ -562,7 +465,6 @@ class ScreenTimeCreate(BaseModel):
     limit: int
     schedule_start: str
     schedule_end: str
-    app_name: Optional[str] = None  # Added app_name
 
 
 class ScreenTimeResponse(BaseModel):
@@ -571,7 +473,6 @@ class ScreenTimeResponse(BaseModel):
     limit: int
     schedule_start: str
     schedule_end: str
-    app_name: Optional[str] = None  # Added app_name
     created_at: str
 
 
@@ -601,7 +502,7 @@ class ScreenshotFilter(BaseModel):
     per_page: int = 12
 
 
-# AI endpoint models
+# ========== NEW MODELS FOR AI ENDPOINT ========== #
 class AI(BaseModel):
     content: str  # Base64-encoded image
 
@@ -621,7 +522,104 @@ class StatusError(BaseModel):
     error: str
 
 
-# Error handlers
+# Helper functions
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> str:
+    """Верификация JWT токена"""
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload"
+            )
+        return user_id
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired"
+        )
+    except jwt.PyJWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid or missing token: {str(e)}"
+        )
+
+
+def generate_code() -> str:
+    """Генерация случайного кода привязки"""
+    chars = string.ascii_uppercase + string.digits
+    return ''.join(random.choice(chars) for _ in range(5))
+
+
+def minutes_to_hh_mm(minutes: int) -> str:
+    """Конвертирует минуты в формат 'Xh Ym'"""
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours}h {mins}m" if hours > 0 else f"{mins}m"
+
+
+# Инициализация базы данных
+async def init_db():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./familyguard.db")
+    engine = create_engine(DATABASE_URL)
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    app.state.db = SessionLocal()
+    logger.info("Database initialized")
+
+
+def get_db():
+    return app.state.db
+
+
+def analyze_image_and_get_category(image_data: bytes, user_id: str, db: Session) -> Tuple[Optional[Category], float]:
+    """
+    Анализирует изображение и возвращает категорию с уровнем достоверности
+    """
+    try:
+        # Получаем существующие категории пользователя
+        categories = db.query(Category).filter(Category.user_id == user_id).all()
+        categories_names = [c.name for c in categories]
+
+        # Анализируем изображение с помощью AI
+        report = moderate_screenshot(image_data, categories_names)
+
+        if "category" in report:
+            category_name = report["category"]
+            confidence = report.get("confidence", 0.0)
+
+            # Ищем существующую категорию
+            category = next((c for c in categories if c.name == category_name), None)
+
+            if not category:
+                # Создаем новую категорию, если не найдена
+                category = Category(
+                    user_id=user_id,
+                    name=category_name,
+                    label=category_name,
+                    description="Автоматически созданная категория",
+                    restricted=False,
+                    icon="📱",
+                    time_limit=0
+                )
+                db.add(category)
+                db.commit()
+                db.refresh(category)
+                logger.info(f"Создана новая категория: {category_name}")
+
+            return category, confidence
+
+    except Exception as e:
+        logger.error(f"Ошибка анализа изображения: {str(e)}")
+
+    return None, 0.0
+
+
+# Обработчики ошибок
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     errors = []
@@ -654,7 +652,7 @@ async def spa_handler(request: Request, exc: HTTPException):
     return FileResponse(static_dir / "index.html")
 
 
-# User registration
+# Регистрация пользователя
 @app.post("/api/v1/register")
 async def register(payload: UserCreate, db: Session = Depends(get_db)):
     try:
@@ -683,18 +681,6 @@ async def register(payload: UserCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
-        # Create default category for new user
-        default_category = Category(
-            user_id=user.user_id,
-            name="Uncategorized",
-            label="Other",
-            description="Default category for uncategorized content",
-            restricted=False,
-            icon="📁"
-        )
-        db.add(default_category)
-        db.commit()
-
         resp = UserResponse(
             userId=user.user_id,
             email=user.email,
@@ -710,7 +696,7 @@ async def register(payload: UserCreate, db: Session = Depends(get_db)):
             }
         )
     except Exception as e:
-        logger.error(f"Registration error: {str(e)}", exc_info=True)
+        logger.error(f"Registration error: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={
@@ -720,7 +706,7 @@ async def register(payload: UserCreate, db: Session = Depends(get_db)):
         )
 
 
-# User login
+# Авторизация пользователя
 @app.post("/api/v1/login")
 async def login(payload: LoginRequest, db: Session = Depends(get_db)):
     try:
@@ -771,7 +757,7 @@ async def login(payload: LoginRequest, db: Session = Depends(get_db)):
         )
 
 
-# User logout
+# Выход из системы
 @app.post("/api/v1/logout")
 async def logout():
     return {
@@ -780,7 +766,7 @@ async def logout():
     }
 
 
-# Token-based authentication
+# Аутентификация по коду привязки
 @app.post("/api/v1/login-via-token", response_model=SuccessResponse)
 async def login_via_token(
         payload: LoginViaTokenRequest,
@@ -855,7 +841,7 @@ async def login_via_token(
         )
 
 
-# Tethering code generation
+# Генерация кода привязки
 @app.post("/api/v1/tethering-code", status_code=201)
 async def create_tethering_code(
         user_id: str = Depends(verify_token),
@@ -904,7 +890,7 @@ async def create_tethering_code(
         )
 
 
-# Device tethering
+# Привязка нового устройства
 @app.post("/api/v1/devices/tether", status_code=201)
 async def tether_device(
         payload: DeviceTetherRequest,
@@ -933,8 +919,7 @@ async def tether_device(
             name=payload.deviceName,
             model=payload.deviceModel,
             osVersion=payload.osVersion,
-            isBlocked=False,
-            heartbeat=now  # Added heartbeat initialization
+            isBlocked=False
         )
         db.add(device)
 
@@ -973,7 +958,7 @@ async def tether_device(
         )
 
 
-# Web-based device addition
+# Добавление устройства через веб
 @app.post("/api/v1/devices", status_code=201)
 async def add_device_via_web(
         payload: WebDeviceCreate,
@@ -1004,8 +989,7 @@ async def add_device_via_web(
             name=payload.name,
             model=payload.model,
             osVersion=payload.osVersion,
-            isBlocked=False,
-            heartbeat=now  # Added heartbeat initialization
+            isBlocked=False
         )
         db.add(device)
 
@@ -1044,7 +1028,7 @@ async def add_device_via_web(
         )
 
 
-# Get devices
+# Получение списка устройств
 @app.get("/api/v1/devices")
 async def get_devices(
         user_id: str = Depends(verify_token),
@@ -1052,8 +1036,8 @@ async def get_devices(
 ):
     try:
         devices = db.query(Device).filter(Device.user_id == user_id).all()
-
         device_list = []
+
         for device in devices:
             status = "online" if not device.isBlocked else "blocked"
             last_active = datetime.utcnow() - timedelta(minutes=5)
@@ -1087,7 +1071,7 @@ async def get_devices(
         )
 
 
-# Get devices for filtering
+# Получение устройств для фильтра
 @app.get("/api/v1/devices/filter")
 async def get_devices_for_filter(
         user_id: str = Depends(verify_token),
@@ -1112,7 +1096,7 @@ async def get_devices_for_filter(
         )
 
 
-# Block device
+# Блокировка устройства
 @app.post("/api/v1/devices/{device_id}/block")
 async def block_device(
         device_id: str,
@@ -1165,7 +1149,7 @@ async def block_device(
         )
 
 
-# Unblock device
+# Разблокировка устройства
 @app.post("/api/v1/devices/{device_id}/unblock")
 async def unblock_device(
         device_id: str,
@@ -1218,7 +1202,7 @@ async def unblock_device(
         )
 
 
-# Emergency lock all devices
+# Экстренная блокировка всех устройств
 @app.post("/api/v1/devices/emergency-lock")
 async def emergency_lock_all_devices(
         user_id: str = Depends(verify_token),
@@ -1259,7 +1243,84 @@ async def emergency_lock_all_devices(
         )
 
 
-# Get notifications
+# Получение расписаний блокировки
+@app.get("/api/v1/schedules", response_model=List[ScheduleResponse])
+async def get_schedules(
+        user_id: str = Depends(verify_token),
+        db: Session = Depends(get_db)
+):
+    try:
+        schedules = db.query(Schedule).join(Device).filter(Device.user_id == user_id).all()
+        response = [
+            ScheduleResponse(
+                id=s.id,
+                device_id=s.device_id,
+                device_name=s.device.name,
+                name=s.name,
+                days=s.days,
+                start_time=s.start_time,
+                end_time=s.end_time,
+                type=s.type,
+                is_active=s.is_active,
+                created_at=s.created_at.isoformat()
+            ) for s in schedules
+        ]
+        return response
+    except Exception as e:
+        logger.error(f"Get schedules error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
+
+# Создание расписания блокировки
+@app.post("/api/v1/schedules", status_code=201)
+async def create_schedule(
+        schedule: ScheduleCreate,
+        user_id: str = Depends(verify_token),
+        db: Session = Depends(get_db)
+):
+    try:
+        device = db.query(Device).filter(
+            Device.device_id == schedule.device_id,
+            Device.user_id == user_id
+        ).first()
+        if not device:
+            logger.warning(f"Device not found: {schedule.device_id}")
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        new_schedule = Schedule(
+            user_id=user_id,
+            device_id=schedule.device_id,
+            name=schedule.name,
+            days=schedule.days,
+            start_time=schedule.start_time,
+            end_time=schedule.end_time,
+            type=schedule.type
+        )
+
+        db.add(new_schedule)
+
+        notification = Notification(
+            user_id=user_id,
+            title="New Blocking Schedule",
+            message=f"You created a new schedule '{schedule.name}' for {device.name}",
+            type="info"
+        )
+        db.add(notification)
+
+        db.commit()
+        return {"status": "success", "message": "Schedule created"}
+    except Exception as e:
+        logger.error(f"Create schedule error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
+
+# Получение уведомлений
 @app.get("/api/v1/notifications", response_model=List[NotificationResponse])
 async def get_notifications(
         user_id: str = Depends(verify_token),
@@ -1296,7 +1357,7 @@ async def get_notifications(
         )
 
 
-# Get recent notifications
+# Получение последних уведомлений
 @app.get("/api/v1/notifications/recent")
 async def get_recent_notifications(
         user_id: str = Depends(verify_token),
@@ -1328,7 +1389,7 @@ async def get_recent_notifications(
         return []
 
 
-# Clear notifications
+# Очистка всех уведомлений
 @app.delete("/api/v1/notifications")
 async def clear_notifications(
         user_id: str = Depends(verify_token),
@@ -1346,7 +1407,7 @@ async def clear_notifications(
         )
 
 
-# Report statistics
+# Отчет статистики
 @app.post("/api/v1/stats/report")
 async def report_statistics(
         payload: StatisticReport,
@@ -1409,7 +1470,7 @@ async def report_statistics(
         )
 
 
-# Get statistics
+# Получение статистики
 @app.get("/api/v1/stats")
 async def get_statistics(
         user_id: str = Depends(verify_token),
@@ -1543,7 +1604,8 @@ async def get_statistics(
 
         return JSONResponse(
             status_code=200,
-            content=StatsResponse(data=stats_data).dict())
+            content=StatsResponse(data=stats_data).dict()
+        )
     except Exception as e:
         logger.error(f"Get statistics error: {str(e)}")
         return JSONResponse(
@@ -1555,7 +1617,7 @@ async def get_statistics(
         )
 
 
-# Dashboard statistics
+# Статистика для дашборда
 @app.get("/api/v1/stats/dashboard")
 async def get_dashboard_stats(
         user_id: str = Depends(verify_token),
@@ -1601,7 +1663,7 @@ async def get_dashboard_stats(
         )
 
 
-# App usage statistics
+# Статистика по использованию приложений
 @app.get("/api/v1/stats/app-usage")
 async def get_app_usage(
         user_id: str = Depends(verify_token),
@@ -1637,7 +1699,7 @@ async def get_app_usage(
         )
 
 
-# Get profile
+# Получение профиля
 @app.get("/api/v1/profile")
 async def get_profile(
         user_id: str = Depends(verify_token),
@@ -1667,7 +1729,7 @@ async def get_profile(
         )
 
 
-# Update profile
+# Обновление профиля
 @app.put("/api/v1/profile")
 async def update_profile(
         profile: ProfileUpdate,
@@ -1698,7 +1760,7 @@ async def update_profile(
         )
 
 
-# Change password
+# Смена пароля
 @app.post("/api/v1/change-password")
 async def change_password(
         passwords: PasswordChange,
@@ -1735,7 +1797,7 @@ async def change_password(
         )
 
 
-# Create category
+# Создание категории
 @app.post("/api/v1/categories", status_code=status.HTTP_201_CREATED)
 async def create_category(
         payload: CategoryCreate,
@@ -1743,16 +1805,11 @@ async def create_category(
         db: Session = Depends(get_db)
 ):
     try:
-        # If label is not provided, use name as label
-        label = payload.label if payload.label else payload.name
-        # If description is not provided, use empty string
-        description = payload.description if payload.description else ""
-
         category = Category(
             user_id=user_id,
             name=payload.name,
-            label=label,
-            description=description,
+            label=payload.label,
+            description=payload.description,
             restricted=payload.restricted,
             icon=payload.icon,
             time_limit=payload.time_limit
@@ -1797,7 +1854,7 @@ async def create_category(
         )
 
 
-# Get categories
+# Получение категорий
 @app.get("/api/v1/categories", response_model=List[CategoryResponse])
 async def get_categories(
         user_id: str = Depends(verify_token),
@@ -1834,7 +1891,7 @@ async def get_categories(
         )
 
 
-# Delete category
+# Удаление категории
 @app.delete("/api/v1/categories/{category_id}")
 async def delete_category(
         category_id: str,
@@ -1885,7 +1942,7 @@ async def delete_category(
         )
 
 
-# Upload screenshot
+# Загрузка скриншота
 @app.post("/api/v1/screenshots", status_code=status.HTTP_201_CREATED)
 async def upload_screenshot(
         transaction_id: str = Form(...),
@@ -1909,25 +1966,10 @@ async def upload_screenshot(
                 }
             )
 
-        # Check file size (max 10MB)
-        max_size = 10 * 1024 * 1024  # 10MB
-        file.file.seek(0, 2)  # Move to end of file
-        file_size = file.file.tell()
-        file.file.seek(0)  # Return to beginning
-
-        if file_size > max_size:
-            return JSONResponse(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                content={
-                    "status": "error",
-                    "message": "File size exceeds 10MB limit"
-                }
-            )
-
-        # Read file content
+        # Читаем содержимое файла
         contents = await file.read()
 
-        # Save file
+        # Сохраняем файл
         file_ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
         filename = f"{uuid.uuid4().hex}{file_ext}"
         file_path = os.path.join(uploads_dir, filename)
@@ -1935,17 +1977,14 @@ async def upload_screenshot(
         with open(file_path, "wb") as buffer:
             buffer.write(contents)
 
-        # Analyze image with AI
+        # Анализируем изображение с помощью AI
         category, confidence = analyze_image_and_get_category(contents, user_id, db)
         category_id = category.id if category else None
 
-        # Use default category if needed
-        if not category:
-            default_category = get_default_category(db, user_id)
-            category_id = default_category.id if default_category else None
-            logger.warning(f"Using default category for screenshot: {filename}")
+        if category:
+            logger.info(f"Изображение отнесено к категории: {category.name} (достоверность: {confidence:.2f})")
 
-        # Create database record
+        # Создаем запись в БД
         screenshot = Screenshot(
             user_id=user_id,
             device_id=device_id,
@@ -1966,12 +2005,6 @@ async def upload_screenshot(
         db.commit()
         db.refresh(screenshot)
 
-        # Get category name for response
-        category_name = None
-        if category_id:
-            cat = db.query(Category).get(category_id)
-            category_name = cat.name if cat else None
-
         return JSONResponse(
             status_code=status.HTTP_201_CREATED,
             content={
@@ -1981,16 +2014,17 @@ async def upload_screenshot(
                     "id": screenshot.id,
                     "image": f"/uploads/{filename}",
                     "category": category_id,
-                    "category_name": category_name,
-                    "confidence": confidence,
+                    "category_name": category.name if category else None,
+                    "confidence": confidence if category else None,
                     "transaction_id": screenshot.transaction_id,
                     "device_id": screenshot.device_id,
                     "created_at": screenshot.created_at.isoformat(),
                     "device_name": device.name
                 }
-            })
+            }
+        )
     except Exception as e:
-        logger.error(f"Upload screenshot error: {str(e)}", exc_info=True)
+        logger.error(f"Upload screenshot error: {str(e)}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
@@ -2000,7 +2034,7 @@ async def upload_screenshot(
         )
 
 
-# Get screenshots
+# Получение скриншотов
 @app.get("/api/v1/screenshots")
 async def get_screenshots(
         category_id: Optional[str] = Query(None),
@@ -2024,31 +2058,9 @@ async def get_screenshots(
             query = query.filter(Screenshot.device_id == device_id)
 
         if start_date:
-            if isinstance(start_date, str):
-                try:
-                    start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
-                except ValueError:
-                    return JSONResponse(
-                        status_code=400,
-                        content={
-                            "status": "error",
-                            "message": "Invalid start_date format. Use YYYY-MM-DD"
-                        }
-                    )
             query = query.filter(Screenshot.created_at >= start_date)
 
         if end_date:
-            if isinstance(end_date, str):
-                try:
-                    end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
-                except ValueError:
-                    return JSONResponse(
-                        status_code=400,
-                        content={
-                            "status": "error",
-                            "message": "Invalid end_date format. Use YYYY-MM-DD"
-                        }
-                    )
             query = query.filter(Screenshot.created_at <= end_date)
 
         total = query.count()
@@ -2056,7 +2068,7 @@ async def get_screenshots(
 
         screenshot_list = []
         for screenshot in screenshots:
-            # Get category name
+            # Получаем имя категории
             category_name = None
             if screenshot.category:
                 category = db.query(Category).filter(Category.id == screenshot.category).first()
@@ -2093,7 +2105,7 @@ async def get_screenshots(
         )
 
 
-# Export screenshots
+# Экспорт скриншотов
 @app.get("/api/v1/screenshots/export")
 async def export_screenshots(
         user_id: str = Depends(verify_token),
@@ -2129,7 +2141,7 @@ async def export_screenshots(
         )
 
 
-# Create screen time
+# Управление экранным временем
 @app.post("/api/v1/screen-time", status_code=status.HTTP_201_CREATED)
 async def create_screen_time(
         payload: ScreenTimeCreate,
@@ -2156,8 +2168,7 @@ async def create_screen_time(
             device_id=payload.device_id,
             limit=payload.limit,
             schedule_start=payload.schedule_start,
-            schedule_end=payload.schedule_end,
-            app_name=payload.app_name  # Added app_name
+            schedule_end=payload.schedule_end
         )
         db.add(screen_time)
 
@@ -2182,7 +2193,6 @@ async def create_screen_time(
                     "limit": screen_time.limit,
                     "schedule_start": screen_time.schedule_start,
                     "schedule_end": screen_time.schedule_end,
-                    "app_name": screen_time.app_name,  # Added app_name
                     "created_at": screen_time.created_at.isoformat()
                 }
             }
@@ -2198,7 +2208,7 @@ async def create_screen_time(
         )
 
 
-# Get screen times
+# Получение ограничений экранного времени
 @app.get("/api/v1/screen-time", response_model=List[ScreenTimeResponse])
 async def get_screen_times(
         user_id: str = Depends(verify_token),
@@ -2216,7 +2226,6 @@ async def get_screen_times(
                 limit=st.limit,
                 schedule_start=st.schedule_start,
                 schedule_end=st.schedule_end,
-                app_name=st.app_name,  # Added app_name
                 created_at=st.created_at.isoformat()
             ) for st in screen_times
         ]
@@ -2228,7 +2237,7 @@ async def get_screen_times(
         )
 
 
-# Update screen time
+# Обновление ограничения экранного времени
 @app.put("/api/v1/screen-time/{screen_time_id}")
 async def update_screen_time(
         screen_time_id: str,
@@ -2269,7 +2278,6 @@ async def update_screen_time(
         screen_time.limit = payload.limit
         screen_time.schedule_start = payload.schedule_start
         screen_time.schedule_end = payload.schedule_end
-        screen_time.app_name = payload.app_name  # Added app_name
 
         notification = Notification(
             user_id=user_id,
@@ -2290,7 +2298,8 @@ async def update_screen_time(
                     "id": screen_time.id,
                     "device_id": screen_time.device_id,
                     "limit": screen_time.limit,
-                    "app_name": screen_time.app_name,  # Added app_name
+                    "schedule_start": screen_time.schedule_start,
+                    "schedule_end": screen_time.schedule_end,
                     "created_at": screen_time.created_at.isoformat()
                 }
             }
@@ -2306,7 +2315,7 @@ async def update_screen_time(
         )
 
 
-# Delete screen time
+# Удаление ограничения экранного времени
 @app.delete("/api/v1/screen-time/{screen_time_id}")
 async def delete_screen_time(
         screen_time_id: str,
@@ -2359,7 +2368,7 @@ async def delete_screen_time(
         )
 
 
-# Log screen time
+# Логирование экранного времени
 @app.post("/api/v1/screen-time/log", status_code=status.HTTP_201_CREATED)
 async def log_screen_time(
         payload: ScreenTimeLogCreate,
@@ -2439,36 +2448,7 @@ async def log_screen_time(
         )
 
 
-@app.post("/api/v1/heartbeat")
-async def heartbeat(device_id: str, db: Session = Depends(get_db)):
-    try:
-        device = db.query(Device).filter(Device.device_id == device_id).first()
-        if not device:
-            raise HTTPException(status_code=404, detail="Device not found")
-
-        device.heartbeat = datetime.utcnow()
-        db.add(device)
-        db.commit()
-
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "success",
-                "message": "Heartbeat updated"
-            }
-        )
-    except Exception as e:
-        logger.error(f"Heartbeat error: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "message": "Internal server error"
-            }
-        )
-
-
-# Health check
+# Проверка здоровья сервера
 @app.get("/api/v1/health")
 async def health_check():
     return {"status": "ok", "message": "Server is running"}
@@ -2480,7 +2460,7 @@ async def ping():
     return {"status": "success", "message": "pong"}
 
 
-# AI endpoint
+# ========== AI ENDPOINT ========== #
 @app.post("/api/v1/ai")
 async def moderate(
         payload: AI,
@@ -2549,7 +2529,7 @@ async def moderate(
         )
 
 
-# Custom OpenAPI schema
+# ========== CUSTOM OPENAPI ========== #
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
@@ -2582,8 +2562,7 @@ def custom_openapi():
         "/api/v1/categories",
         "/api/v1/screenshots",
         "/api/v1/screen-time",
-        "/api/v1/ai",
-        "/api/v1/heartbeat"  # Added heartbeat
+        "/api/v1/ai"
     ]
 
     for path, methods in schema["paths"].items():
@@ -2597,10 +2576,10 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
-# Mount static files
+# Монтирование статики
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
-# Run server
+# Запуск сервера
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)
