@@ -3,13 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FamilyGuard: Advanced Parental Control</title>
+    <title>FamilyGuard: AI-Powered Parental Control</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
+        #dashboardPage #addDeviceBtn {
+        display: none;
+    }
         :root {
             --primary: #4361ee;
             --primary-light: #5a75f0;
@@ -1077,14 +1079,6 @@
             background: var(--light-gray);
         }
 
-        .category-item > div {
-            flex: 1;
-        }
-
-        .category-item .btn {
-            margin-left: 10px;
-        }
-
         .screenshot-container {
             margin: 15px 0;
             text-align: center;
@@ -1179,7 +1173,6 @@
             flex: 1;
         }
 
-        /* ================ UPDATED MONITORING STYLES ================ */
         .monitoring-container {
             display: grid;
             grid-template-columns: 300px 1fr;
@@ -1404,7 +1397,6 @@
             margin-right: 12px;
             flex-shrink: 0;
             font-size: 1.5rem;
-            background: var(--bg-card);
         }
 
         .category-info {
@@ -1722,6 +1714,36 @@
             flex-wrap: wrap;
         }
 
+        .ai-badge {
+            background: var(--info);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+
+        .screenshot-ai-info {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.8rem;
+            color: var(--info);
+            margin: 5px 0;
+        }
+
+        .ai-analysis-tag {
+            background: rgba(0, 180, 216, 0.1);
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
         @media (max-width: 992px) {
             .monitoring-container {
                 grid-template-columns: 1fr;
@@ -1815,6 +1837,16 @@
                 font-size: 1.2rem;
             }
         }
+
+            /* Скрыть кнопку экспорта на странице мониторинга */
+    #monitoringPage #exportScreenshots {
+        display: none;
+    }
+
+    /* Скрыть кнопки выбора типа графика на странице статистики */
+    #statisticsPage .chart-type-selector {
+        display: none;
+    }
     </style>
 </head>
 <body>
@@ -1823,7 +1855,7 @@
             <div class="header-content">
                 <div class="logo">
                     <i class="fas fa-shield-alt"></i>
-                    <span>FamilyGuard</span>
+                    <span>FamilyGuard AI</span>
                 </div>
 
                 <button id="mobileMenuBtn" class="btn btn-outline">
@@ -1892,17 +1924,17 @@
                 <form id="registerForm">
                     <div class="form-group">
                         <label for="firstName">First Name</label>
-                        <input type="text" id="firstName" class="form-control" placeholder="Enter your first name" required>
+                        <input type="text" id="firstName" class="form-control" placeholder="example: User" required>
                     </div>
 
                     <div class="form-group">
                         <label for="lastName">Last Name</label>
-                        <input type="text" id="lastName" class="form-control" placeholder="Enter your last name" required>
+                        <input type="text" id="lastName" class="form-control" placeholder="example: User" required>
                     </div>
 
                     <div class="form-group">
                         <label for="registerEmail">Email</label>
-                        <input type="email" id="registerEmail" class="form-control" placeholder="Enter your email" required>
+                        <input type="email" id="registerEmail" class="form-control" placeholder="example: test@gmail.com" required>
                     </div>
 
                     <div class="form-group">
@@ -1944,7 +1976,7 @@
 
                     <div class="form-group">
                         <label for="phone">Phone</label>
-                        <input type="tel" id="phone" class="form-control" placeholder="Enter your phone number">
+                        <input type="tel" id="phone" class="form-control" placeholder="example: 89990009999">
                     </div>
 
                     <div class="form-group" style="margin-top: 30px;">
@@ -2033,7 +2065,7 @@
 
         <!-- Monitoring Page -->
         <div id="monitoringPage" class="page">
-            <h1 class="page-title"><i class="fas fa-eye"></i> Monitoring</h1>
+            <h1 class="page-title"><i class="fas fa-eye"></i> Monitoring <span class="ai-analysis-tag"><i class="fas fa-robot"></i> AI-Powered</span></h1>
 
             <div class="monitoring-container">
                 <div class="categories-sidebar">
@@ -2051,6 +2083,7 @@
                         <div class="filter-tab active" data-filter="all">All</div>
                         <div class="filter-tab" data-filter="restricted">Blocked</div>
                         <div class="filter-tab" data-filter="limited">Limited</div>
+                        <div class="filter-tab" data-filter="ai">AI-Generated</div>
                     </div>
 
                     <div id="categoriesList">
@@ -2065,6 +2098,10 @@
                         <div class="stat-item">
                             <div class="stat-value" id="totalScreenshots">0</div>
                             <div class="stat-label">Screenshots</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="aiCategories">0</div>
+                            <div class="stat-label">AI Categories</div>
                         </div>
                     </div>
                 </div>
@@ -2431,15 +2468,17 @@
                     </div>
 
                     <div class="form-group">
-                        <label class="switch">
-                            <input type="checkbox" id="categoryRestricted">
-                            <span class="slider"></span>
+                        <div class="toggle-container">
+                            <label class="switch">
+                                <input type="checkbox" id="categoryRestricted">
+                                <span class="slider"></span>
+                            </label>
                             <span class="toggle-label">Block this category completely</span>
-                        </label>
+                        </div>
                     </div>
 
                     <div class="form-group">
-                        <label>Daily Time Limit</label>
+                        <label>Daily Time Limit (minutes)</label>
                         <div class="time-limit-controls">
                             <input type="number" id="timeLimit" class="form-control time-limit-input" placeholder="0 = no limit" min="0">
                             <div class="time-limit-buttons">
@@ -2486,6 +2525,7 @@
                 <div class="screenshot-meta-info">
                     <div id="screenshotDeviceInfo"><i class="fas fa-mobile-alt"></i> <span></span></div>
                     <div id="screenshotDateInfo"><i class="fas fa-calendar-alt"></i> <span></span></div>
+                    <div id="screenshotAiInfo"><i class="fas fa-robot"></i> <span></span></div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -2591,6 +2631,8 @@
         const prevPage = document.getElementById('prevPage');
         const nextPage = document.getElementById('nextPage');
         const pageInfo = document.querySelector('.page-info');
+        const aiCategoriesCount = document.getElementById('aiCategories');
+        const screenshotAiInfo = document.getElementById('screenshotAiInfo').querySelector('span');
 
         // Chart instances
         let usageChartInstance = null;
@@ -2602,8 +2644,6 @@
         let currentUsageData = null;
         let currentStatsData = null;
         let devices = [];
-
-        // Category management
         let categories = [];
         let currentEditingCategoryId = null;
         let currentCategoryId = 'all';
@@ -2619,74 +2659,6 @@
             '✉️', '🌐', '🔗', '📌', '📍', '🔎', '🛑', '✅', '❌', '➕',
             '➖', '❓', '❗', '⭐', '🎯', '🏆', '⚽', '🏀', '🎾', '🎲'
         ];
-
-        // Default categories with mock data
-        const DEFAULT_CATEGORIES = [
-            {
-                id: 1,
-                name: "Social Media",
-                icon: "📱",
-                restricted: false,
-                timeLimit: 60,
-                screenshots: []
-            },
-            {
-                id: 2,
-                name: "Games",
-                icon: "🎮",
-                restricted: false,
-                timeLimit: 45,
-                screenshots: []
-            },
-            {
-                id: 3,
-                name: "Video Streaming",
-                icon: "🎬",
-                restricted: false,
-                timeLimit: 90,
-                screenshots: []
-            },
-            {
-                id: 4,
-                name: "Shopping",
-                icon: "🛒",
-                restricted: true,
-                timeLimit: 30,
-                screenshots: []
-            },
-            {
-                id: 5,
-                name: "Education",
-                icon: "📚",
-                restricted: false,
-                timeLimit: 0,
-                screenshots: []
-            }
-        ];
-
-        // Initialize emoji picker
-        function initEmojiPicker() {
-            emojiPicker.innerHTML = '';
-
-            EMOJIS.forEach(emoji => {
-                const emojiOption = document.createElement('div');
-                emojiOption.className = 'emoji-option';
-                emojiOption.textContent = emoji;
-                emojiOption.addEventListener('click', () => {
-                    document.querySelectorAll('.emoji-option').forEach(opt =>
-                        opt.classList.remove('selected'));
-                    emojiOption.classList.add('selected');
-                    document.getElementById('categoryIcon').value = emoji;
-                });
-                emojiPicker.appendChild(emojiOption);
-            });
-
-            // Select first emoji by default
-            if (EMOJIS.length > 0) {
-                emojiPicker.firstChild?.classList.add('selected');
-                document.getElementById('categoryIcon').value = EMOJIS[0];
-            }
-        }
 
         // Show notification
         function showNotification(message, type = 'success') {
@@ -2797,17 +2769,7 @@
 
             try {
                 const response = await fetch(`${API_BASE_URL}${url}`, options);
-
-                // Check if response is JSON
-                const contentType = response.headers.get('content-type');
-                let data;
-
-                if (contentType && contentType.includes('application/json')) {
-                    data = await response.json();
-                } else {
-                    const text = await response.text();
-                    throw new Error(text || `Unexpected response: ${response.status}`);
-                }
+                const data = await response.json();
 
                 if (!response.ok) {
                     const error = data.message || `Request failed: ${response.status}`;
@@ -3084,6 +3046,82 @@
         // MONITORING FUNCTIONALITY
         // ==============================================
 
+        async function createDefaultCategories() {
+    const defaultCategories = [
+        { name: "Social Media", icon: "📱", restricted: false, time_limit: 60 },
+        { name: "Games", icon: "🎮", restricted: false, time_limit: 60 },
+        { name: "Education", icon: "📚", restricted: false, time_limit: 0 },
+        { name: "Entertainment", icon: "🎬", restricted: false, time_limit: 90 },
+        { name: "Adult Content", icon: "🔞", restricted: true, time_limit: 0 }
+    ];
+
+    try {
+        for (const category of defaultCategories) {
+            await apiRequest('/api/v1/categories', 'POST', {
+                name: category.name,
+                icon: category.icon,
+                restricted: category.restricted,
+                time_limit: category.time_limit,
+                label: category.name,
+                description: ""
+            });
+        }
+        showNotification('Default categories created', 'success');
+    } catch (error) {
+        console.error('Error creating default categories:', error);
+    }
+}
+
+async function loadCategories() {
+    try {
+        const response = await apiRequest('/api/v1/categories', 'GET');
+        categories = Array.isArray(response)
+            ? response
+            : response.data || [];
+
+        // Create default categories if none exist
+        if (categories.length === 0) {
+            await createDefaultCategories();
+            // Reload categories after creation
+            const responseAgain = await apiRequest('/api/v1/categories', 'GET');
+            categories = Array.isArray(responseAgain)
+                ? responseAgain
+                : responseAgain.data || [];
+        }
+
+        renderCategories();
+    } catch (error) {
+        showNotification(`Error loading categories: ${error.message}`, 'error');
+        categories = [];
+    }
+}
+
+
+
+        // Initialize emoji picker
+        function initEmojiPicker() {
+            emojiPicker.innerHTML = '';
+
+            EMOJIS.forEach(emoji => {
+                const emojiOption = document.createElement('div');
+                emojiOption.className = 'emoji-option';
+                emojiOption.textContent = emoji;
+                emojiOption.addEventListener('click', () => {
+                    document.querySelectorAll('.emoji-option').forEach(opt =>
+                        opt.classList.remove('selected'));
+                    emojiOption.classList.add('selected');
+                    document.getElementById('categoryIcon').value = emoji;
+                });
+                emojiPicker.appendChild(emojiOption);
+            });
+
+            // Select first emoji by default
+            if (EMOJIS.length > 0) {
+                emojiPicker.firstChild?.classList.add('selected');
+                document.getElementById('categoryIcon').value = EMOJIS[0];
+            }
+        }
+
         // Load monitoring page
         async function loadMonitoringPage() {
             // Show loading state
@@ -3103,28 +3141,22 @@
             initMonitoringEventListeners();
         }
 
-        // Generate mock screenshots for category
-        function generateMockScreenshotsForCategory(categoryId) {
-            const count = Math.floor(Math.random() * 15) + 3;
-            const screenshots = [];
-            const devices = ['iPhone 12', 'iPad Pro', 'Samsung Galaxy', 'Google Pixel'];
+        // Load categories
+        async function loadCategories() {
+    try {
+        const response = await apiRequest('/api/v1/categories', 'GET');
 
-            for (let i = 0; i < count; i++) {
-                const daysAgo = Math.floor(Math.random() * 30);
-                const date = new Date();
-                date.setDate(date.getDate() - daysAgo);
+        // Исправленная обработка ответа:
+        categories = Array.isArray(response)
+            ? response
+            : response.data || [];
 
-                screenshots.push({
-                    id: `scr_${categoryId}_${i}`,
-                    imageUrl: `https://picsum.photos/seed/${categoryId}-${i}/600/400`,
-                    device: devices[Math.floor(Math.random() * devices.length)],
-                    date: date.toISOString(),
-                    categoryId: categoryId
-                });
-            }
-
-            return screenshots.sort((a, b) => new Date(b.date) - new Date(a.date));
-        }
+        renderCategories();
+    } catch (error) {
+        showNotification(`Error loading categories: ${error.message}`, 'error');
+        categories = [];
+    }
+}
 
         // Render categories
         function renderCategories() {
@@ -3138,14 +3170,14 @@
                 <div class="category-icon">📂</div>
                 <div class="category-info">
                     <div class="category-name">All Categories</div>
-                    <div class="category-stats">
-                        <span>${getTotalScreenshotsCount()} screenshots</span>
-                    </div>
                 </div>
             `;
             categoriesList.appendChild(allItem);
 
             // Add categories
+            const aiCategories = categories.filter(c => c.created_by_ai);
+            aiCategoriesCount.textContent = aiCategories.length;
+
             categories.forEach(category => {
                 const categoryItem = document.createElement('div');
                 categoryItem.className = `category-item ${currentCategoryId === category.id ? 'active' : ''}`;
@@ -3155,40 +3187,33 @@
                     <div class="category-info">
                         <div class="category-name">${category.name}</div>
                         <div class="category-stats">
-                            <span>${category.screenshots.length} screenshots</span>
-                            ${category.timeLimit > 0 ?
-                                `<span>${category.timeLimit} min limit</span>` :
+                            ${category.time_limit > 0 ?
+                                `<span>${category.time_limit} min limit</span>` :
                                 `<span>No limit</span>`}
                         </div>
                     </div>
+                    ${category.created_by_ai ? `<div class="category-badge ai-badge">AI</div>` : ''}
+                    ${category.restricted ? `<div class="category-badge">Blocked</div>` : ''}
                     <div class="category-actions">
-                        <div class="category-action-btn edit-category-btn" data-category-id="${category.id}">
-                            <i class="fas fa-pencil-alt"></i>
+                        <div class="category-action-btn edit-category" data-id="${category.id}">
+                            <i class="fas fa-edit"></i>
                         </div>
-                        <div class="category-action-btn delete-category-btn" data-category-id="${category.id}">
+                        <div class="category-action-btn delete-category" data-id="${category.id}">
                             <i class="fas fa-trash"></i>
                         </div>
                     </div>
-                    ${category.restricted ? `<div class="category-badge">Blocked</div>` : ''}
                 `;
                 categoriesList.appendChild(categoryItem);
             });
 
-            // Update stats
             document.getElementById('categoriesCount').textContent = categories.length;
-            document.getElementById('totalScreenshots').textContent = getTotalScreenshotsCount();
-        }
-
-        // Get total screenshots count
-        function getTotalScreenshotsCount() {
-            return categories.reduce((total, cat) => total + cat.screenshots.length, 0);
         }
 
         // Load devices for filter
         async function loadDevicesForFilter() {
             try {
-                // In a real app, this would be an API call
-                const devices = ['iPhone 12', 'iPad Pro', 'Samsung Galaxy', 'Google Pixel'];
+                const data = await apiRequest('/api/v1/devices/filter', 'GET');
+                const devices = data.data || [];
                 const deviceFilter = document.getElementById('deviceFilter');
 
                 // Clear existing options except "All Devices"
@@ -3198,8 +3223,8 @@
 
                 devices.forEach(device => {
                     const option = document.createElement('option');
-                    option.value = device;
-                    option.textContent = device;
+                    option.value = device.id;
+                    option.textContent = device.name;
                     deviceFilter.appendChild(option);
                 });
             } catch (error) {
@@ -3210,109 +3235,135 @@
         // Load screenshots
         async function loadScreenshots() {
             try {
-                screenshotsGrid.innerHTML = '';
+                // Prepare filters object
+                const filters = {
+                    page: currentPage,
+                    per_page: itemsPerPage,
+                    sort: sortFilter.value
+                };
 
-                // Get screenshots for current category
-                let screenshots = [];
-                let categoryName = "All Categories";
+                // Apply device filter if not 'all'
+                if (deviceFilter.value && deviceFilter.value !== 'all') {
+                    filters.device_id = deviceFilter.value;
+                }
 
-                if (currentCategoryId === 'all') {
-                    // All screenshots from all categories
-                    screenshots = categories.flatMap(cat => cat.screenshots);
-                } else {
-                    // Screenshots only from selected category
-                    const category = categories.find(c => c.id == currentCategoryId);
-                    if (category) {
-                        screenshots = category.screenshots;
-                        categoryName = category.name;
+                // Apply category filter if not 'all'
+                if (currentCategoryId && currentCategoryId !== 'all') {
+                    filters.category_id = currentCategoryId;
+                }
+
+                // Process date range if selected
+                if (dateRangePicker.value) {
+                    const dates = dateRangePicker.value.split(' to ');
+                    filters.start_date = dates[0];
+                    if (dates[1]) {
+                        filters.end_date = dates[1];
                     }
                 }
 
-                // Apply filters
-                const dateRangeValue = document.getElementById('dateRangePicker').value;
-                const deviceFilterValue = document.getElementById('deviceFilter').value;
-                const sortFilterValue = document.getElementById('sortFilter').value;
+                // Build query string
+                const queryParams = new URLSearchParams(filters).toString();
 
-                // Date filtering
-                if (dateRangeValue) {
-                    const [startDate, endDate] = dateRangeValue.split(" to ");
-                    screenshots = screenshots.filter(scr => {
-                        const scrDate = new Date(scr.date);
-                        return (!startDate || scrDate >= new Date(startDate)) &&
-                               (!endDate || scrDate <= new Date(endDate));
-                    });
+                // Make API request
+                const response = await apiRequest(`/api/v1/screenshots?${queryParams}`, 'GET');
+
+                // Clear previous screenshots
+                screenshotsGrid.innerHTML = '';
+
+                // Check if we got data
+                if (!response.data || response.data.length === 0) {
+                    showEmptyState();
+                    updateScreenshotsHeader(0);
+                    return;
                 }
 
-                // Device filtering
-                if (deviceFilterValue !== 'all') {
-                    screenshots = screenshots.filter(scr => scr.device === deviceFilterValue);
-                }
+                // Process and display screenshots
+                renderScreenshots(response.data);
 
-                // Sorting
-                if (sortFilterValue === 'newest') {
-                    screenshots.sort((a, b) => new Date(b.date) - new Date(a.date));
-                } else {
-                    screenshots.sort((a, b) => new Date(a.date) - new Date(b.date));
-                }
+                // Update pagination and header
+                updatePaginationUI(response.pagination?.total_pages || 1);
+                updateScreenshotsHeader(response.pagination?.total || response.data.length);
 
-                // Update header
-                updateScreenshotsHeader(screenshots.length, categoryName);
-
-                // Pagination
-                const totalPages = Math.ceil(screenshots.length / itemsPerPage);
-                updatePaginationUI(totalPages);
-
-                // Get current page items
-                const startIndex = (currentPage - 1) * itemsPerPage;
-                const endIndex = startIndex + itemsPerPage;
-                const pageScreenshots = screenshots.slice(startIndex, endIndex);
-
-                // Display screenshots
-                renderScreenshots(pageScreenshots);
             } catch (error) {
-                showNotification(`Error loading screenshots: ${error.message}`, 'error');
+                console.error('Error loading screenshots:', error);
+                screenshotsGrid.innerHTML = `
+                    <div class="empty-screenshots">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <h3>Error Loading Screenshots</h3>
+                        <p>${error.message || 'Please try again later'}</p>
+                        <button class="btn btn-primary" onclick="loadScreenshots()">
+                            <i class="fas fa-sync-alt"></i> Retry
+                        </button>
+                    </div>
+                `;
             }
         }
 
-        // Update pagination UI
+        // Show empty state when no screenshots found
+        function showEmptyState() {
+            screenshotsGrid.innerHTML = `
+                <div class="empty-screenshots">
+                    <i class="fas fa-image"></i>
+                    <h3>No Screenshots Found</h3>
+                    <p>Try changing your filters or select a different category</p>
+                </div>
+            `;
+        }
+
+        // Update screenshots header with count and category
+        function updateScreenshotsHeader(totalCount) {
+            const title = document.getElementById('currentCategoryTitle');
+            const countEl = document.getElementById('screenshotsCount');
+
+            // Set category name
+            if (currentCategoryId === 'all') {
+                title.textContent = 'All Screenshots';
+            } else {
+                const category = categories.find(c => c.id == currentCategoryId);
+                if (category) {
+                    title.innerHTML = `<span style="margin-right: 10px;">${category.icon}</span> ${category.name}`;
+                }
+            }
+
+            // Set count
+            countEl.textContent = `${totalCount} ${totalCount === 1 ? 'screenshot' : 'screenshots'}`;
+        }
+
+        // Update pagination controls
         function updatePaginationUI(totalPages) {
-            prevPage.disabled = currentPage === 1;
-            nextPage.disabled = currentPage === totalPages || totalPages === 0;
+            prevPage.disabled = currentPage <= 1;
+            nextPage.disabled = currentPage >= totalPages;
             pageInfo.textContent = `Page ${currentPage} of ${totalPages || 1}`;
         }
 
-        // Render screenshots
+        // Render screenshots to the grid
         function renderScreenshots(screenshots) {
-            screenshotsGrid.innerHTML = '';
-
-            if (screenshots.length === 0) {
-                screenshotsGrid.innerHTML = `
-                    <div class="monitoring-empty-state">
-                        <i class="fas fa-image"></i>
-                        <h3>No Screenshots Found</h3>
-                        <p>Try changing your filters or select a different category</p>
-                    </div>
-                `;
-                return;
-            }
-
             screenshots.forEach(screenshot => {
+                const imgPath = screenshot.image_url || screenshot.image;
+                const src = `${API_BASE_URL}${imgPath.startsWith('/') ? '' : '/uploads/'}${imgPath}`;
+
                 const screenshotCard = document.createElement('div');
                 screenshotCard.className = 'screenshot-card';
                 screenshotCard.innerHTML = `
                     <div class="screenshot-image-container">
-                        <img src="${screenshot.imageUrl}"
+                        <img src="${src}"
                              alt="Screenshot"
-                             class="screenshot-image">
+                             class="screenshot-image"
+                             loading="lazy">
                     </div>
                     <div class="screenshot-meta">
                         <div class="screenshot-date">
-                            ${formatDate(screenshot.date)}
+                            ${formatDate(screenshot.created_at)}
                         </div>
                         <div class="screenshot-device">
                             <i class="fas fa-mobile-alt"></i>
-                            <span>${screenshot.device}</span>
+                            <span>${screenshot.device_name}</span>
                         </div>
+                        ${screenshot.ai_analysis ? `
+                        <div class="screenshot-ai-info">
+                            <i class="fas fa-robot"></i>
+                            <span>${screenshot.ai_analysis}</span>
+                        </div>` : ''}
                         <div class="screenshot-actions">
                             <button class="btn btn-sm btn-primary view-screenshot" data-id="${screenshot.id}">
                                 <i class="fas fa-expand"></i> View
@@ -3325,34 +3376,44 @@
                 `;
                 screenshotsGrid.appendChild(screenshotCard);
             });
+
+            setupScreenshotEventListeners();
         }
 
-        // Update screenshots header
-        function updateScreenshotsHeader(count, categoryName) {
-            const title = document.getElementById('currentCategoryTitle');
-            const countEl = document.getElementById('screenshotsCount');
-
-            title.textContent = categoryName;
-            countEl.textContent = `${count} ${count === 1 ? 'screenshot' : 'screenshots'}`;
-
-            // Add category icon if not "All Categories"
-            if (currentCategoryId !== 'all') {
-                const category = categories.find(c => c.id == currentCategoryId);
-                if (category) {
-                    title.innerHTML = `<span style="margin-right: 10px;">${category.icon}</span> ${categoryName}`;
-                }
+        // Format date for display
+        function formatDate(dateString) {
+            try {
+                const date = new Date(dateString);
+                return date.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch (e) {
+                console.error('Error formatting date:', dateString);
+                return 'Unknown date';
             }
         }
 
-        // Format date
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
+        // Setup event listeners for screenshot actions
+        function setupScreenshotEventListeners() {
+            // View screenshot
+            document.querySelectorAll('.view-screenshot').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const screenshotId = btn.dataset.id;
+                    openScreenshotViewer(screenshotId);
+                });
+            });
+
+            // Delete screenshot
+            document.querySelectorAll('.delete-screenshot').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const screenshotId = btn.dataset.id;
+                    deleteScreenshot(screenshotId);
+                });
             });
         }
 
@@ -3372,14 +3433,13 @@
 
                     document.getElementById('categoryName').value = category.name;
                     document.getElementById('categoryRestricted').checked = category.restricted;
-                    document.getElementById('timeLimit').value = category.timeLimit;
+                    document.getElementById('timeLimit').value = category.time_limit;
 
                     // Select the correct emoji
                     setTimeout(() => {
-                        const emojiOptions = document.querySelectorAll('.emoji-option');
-                        emojiOptions.forEach(option => {
-                            if (option.textContent === category.icon) {
-                                option.classList.add('selected');
+                        document.querySelectorAll('.emoji-option').forEach(opt => {
+                            if (opt.textContent === category.icon) {
+                                opt.classList.add('selected');
                                 document.getElementById('categoryIcon').value = category.icon;
                             }
                         });
@@ -3404,68 +3464,57 @@
         }
 
         // Save category
-        async function saveCategory(categoryData) {
-            try {
-                // For demo, update local data
-                if (currentEditingCategoryId) {
-                    // Update existing category
-                    const index = categories.findIndex(c => c.id == currentEditingCategoryId);
-                    if (index !== -1) {
-                        categories[index] = {
-                            ...categories[index],
-                            name: categoryData.name,
-                            icon: categoryData.icon,
-                            restricted: categoryData.restricted,
-                            timeLimit: parseInt(categoryData.timeLimit) || 0
-                        };
-                    }
-                } else {
-                    // Add new category
-                    const newCategory = {
-                        id: Date.now(), // Generate ID
-                        name: categoryData.name,
-                        icon: categoryData.icon,
-                        restricted: categoryData.restricted,
-                        timeLimit: parseInt(categoryData.timeLimit) || 0,
-                        screenshots: generateMockScreenshotsForCategory(Date.now())
-                    };
-                    categories.push(newCategory);
-                }
+        // Save category
+async function saveCategory(categoryData) {
+    try {
+        const url = currentEditingCategoryId
+            ? `/api/v1/categories/${currentEditingCategoryId}`
+            : '/api/v1/categories';
 
-                showNotification(
-                    `Category "${categoryData.name}" ${currentEditingCategoryId ? 'updated' : 'added'} successfully`,
-                    'success'
-                );
+        // Исправлено: используем PATCH вместо PUT
+        const method = currentEditingCategoryId ? 'PATCH' : 'POST';
 
-                // Update UI
-                renderCategories();
+        // Формируем payload
+        const payload = {
+            name: categoryData.name,
+            icon: categoryData.icon,
+            restricted: categoryData.restricted,
+            time_limit: parseInt(categoryData.timeLimit) || 0,
+            label: categoryData.name,
+            description: ""
+        };
 
-                // Close modal
-                categoryModal.style.display = 'none';
-                categoryForm.reset();
-            } catch (error) {
-                showNotification(`Error saving category: ${error.message}`, 'error');
-            }
-        }
+        console.log(`Sending ${method} request to: ${url}`, payload);
+
+        const response = await apiRequest(url, method, payload);
+
+        showNotification(
+            `Category "${categoryData.name}" saved`,
+            'success'
+        );
+
+        await loadCategories();
+        categoryModal.style.display = 'none';
+    } catch (error) {
+        console.error('Error saving category:', error);
+        showNotification(`Error saving category: ${error.message}`, 'error');
+    }
+}
 
         // Delete category
         async function deleteCategory(categoryId) {
             if (confirm('Are you sure you want to delete this category? Screenshots will not be deleted.')) {
                 try {
-                    // In a real app, this would be an API call
-                    const index = categories.findIndex(c => c.id == categoryId);
-                    if (index !== -1) {
-                        categories.splice(index, 1);
-                    }
+                    await apiRequest(`/api/v1/categories/${categoryId}`, 'DELETE');
+                    showNotification('Category deleted', 'success');
 
                     // If we were viewing this category, switch to "All"
                     if (currentCategoryId == categoryId) {
                         currentCategoryId = 'all';
                     }
 
-                    showNotification('Category deleted', 'success');
-                    renderCategories();
-                    loadScreenshots();
+                    await loadCategories();
+                    await loadScreenshots();
                 } catch (error) {
                     showNotification(`Error deleting category: ${error.message}`, 'error');
                 }
@@ -3473,50 +3522,49 @@
         }
 
         // Open screenshot viewer
-        function openScreenshotViewer(screenshotId) {
-            // Find the screenshot in all categories
-            let screenshot = null;
-            for (const category of categories) {
-                const found = category.screenshots.find(s => s.id === screenshotId);
-                if (found) {
-                    screenshot = found;
-                    break;
-                }
+        async function openScreenshotViewer(screenshotId) {
+            try {
+                const response = await apiRequest(`/api/v1/screenshots/${screenshotId}`, 'GET');
+                const screenshot = response.data;
+
+                if (!screenshot) return;
+
+                // Set the screenshot data
+                const imgPath = screenshot.image_url || screenshot.image;
+                screenshotViewer.src = `${API_BASE_URL}${imgPath.startsWith('/') ? '' : '/uploads/'}${imgPath}`;
+                screenshotViewer.style.transform = 'scale(1)';
+
+                // Set metadata
+                document.getElementById('screenshotDeviceInfo').querySelector('span').textContent = screenshot.device_name;
+                document.getElementById('screenshotDateInfo').querySelector('span').textContent = formatDate(screenshot.created_at);
+                screenshotAiInfo.textContent = screenshot.ai_analysis || 'No AI analysis available';
+
+                // Set the delete button data
+                deleteScreenshotBtn.dataset.screenshotId = screenshotId;
+
+                screenshotModal.style.display = 'flex';
+            } catch (error) {
+                showNotification(`Error loading screenshot: ${error.message}`, 'error');
             }
-
-            if (!screenshot) return;
-
-            // Set the screenshot data
-            screenshotViewer.src = screenshot.imageUrl;
-            screenshotViewer.style.transform = 'scale(1)';
-            document.getElementById('screenshotDeviceInfo').querySelector('span').textContent = screenshot.device;
-            document.getElementById('screenshotDateInfo').querySelector('span').textContent = formatDate(screenshot.date);
-
-            // Set the delete button data
-            deleteScreenshotBtn.dataset.screenshotId = screenshotId;
-
-            screenshotModal.style.display = 'flex';
         }
 
         // Delete screenshot
         async function deleteScreenshot(screenshotId) {
             if (confirm('Are you sure you want to delete this screenshot?')) {
                 try {
-                    // In a real app, this would be an API call
-                    // For demo, we'll just update the UI
+                    await apiRequest(`/api/v1/screenshots/${screenshotId}`, 'DELETE');
+                    showNotification('Screenshot deleted', 'success');
 
-                    // Find and remove the screenshot from its category
-                    for (const category of categories) {
-                        const index = category.screenshots.findIndex(s => s.id === screenshotId);
-                        if (index !== -1) {
-                            category.screenshots.splice(index, 1);
-                            break;
-                        }
+                    // Remove from UI
+                    const screenshotElement = document.querySelector(`.screenshot-card[data-id="${screenshotId}"]`);
+                    if (screenshotElement) {
+                        screenshotElement.remove();
                     }
 
-                    showNotification('Screenshot deleted', 'success');
-                    renderCategories();
-                    loadScreenshots();
+                    // Update counts
+                    await loadCategories();
+                    await loadScreenshots();
+
                     screenshotModal.style.display = 'none';
                 } catch (error) {
                     showNotification(`Error deleting screenshot: ${error.message}`, 'error');
@@ -3536,35 +3584,20 @@
                 }
 
                 // Edit category button
-                if (e.target.closest('.edit-category-btn')) {
+                if (e.target.closest('.edit-category')) {
                     e.stopPropagation();
-                    const btn = e.target.closest('.edit-category-btn');
-                    const categoryId = btn.dataset.categoryId;
+                    const btn = e.target.closest('.edit-category');
+                    const categoryId = btn.dataset.id;
                     openCategoryModal(categoryId);
                 }
 
                 // Delete category button
-                if (e.target.closest('.delete-category-btn')) {
+                if (e.target.closest('.delete-category')) {
                     e.stopPropagation();
-                    const btn = e.target.closest('.delete-category-btn');
-                    const categoryId = btn.dataset.categoryId;
+                    const btn = e.target.closest('.delete-category');
+                    const categoryId = btn.dataset.id;
                     deleteCategory(categoryId);
                 }
-            });
-
-            // View screenshot
-            document.addEventListener('click', (e) => {
-                if (e.target.closest('.view-screenshot')) {
-                    const btn = e.target.closest('.view-screenshot');
-                    const screenshotId = btn.dataset.id;
-                    openScreenshotViewer(screenshotId);
-                }
-            });
-
-            // Delete screenshot from modal
-            deleteScreenshotBtn.addEventListener('click', (e) => {
-                const screenshotId = e.target.closest('button').dataset.screenshotId;
-                deleteScreenshot(screenshotId);
             });
 
             // Time limit quick buttons
@@ -3606,8 +3639,25 @@
             });
 
             // Export screenshots
-            exportScreenshots.addEventListener('click', () => {
-                showNotification('Export feature will be available soon', 'info');
+            exportScreenshots.addEventListener('click', async () => {
+                try {
+                    showLoader();
+                    const response = await apiRequest('/api/v1/screenshots/export', 'GET');
+
+                    // Create a temporary link to trigger download
+                    const link = document.createElement('a');
+                    link.href = `${API_BASE_URL}${response.url}`;
+                    link.download = 'screenshots_export.zip';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+
+                    showNotification('Export started successfully', 'success');
+                } catch (error) {
+                    showNotification(`Export failed: ${error.message}`, 'error');
+                } finally {
+                    hideLoader();
+                }
             });
 
             // Pagination
@@ -3709,22 +3759,6 @@
             } catch (error) {
                 showNotification(`Error loading statistics: ${error.message}`, 'error');
             }
-        }
-
-        // Get unicode for Font Awesome icons
-        function getUnicode(iconClass) {
-            const iconMap = {
-                'fa-comments': 'f086',
-                'fa-gamepad': 'f11b',
-                'fa-video': 'f03d',
-                'fa-shopping-cart': 'f07a',
-                'fa-book': 'f02d',
-                'fa-newspaper': 'f1ea',
-                'fa-music': 'f001',
-                'fa-camera': 'f030'
-            };
-
-            return iconMap[iconClass] || 'f05a'; // Default: info-circle
         }
 
         // Render usage chart
@@ -4111,25 +4145,23 @@
         // Load recent notifications
         async function loadRecentNotifications() {
             try {
-                const data = await apiRequest('/api/v1/notifications?limit=3', 'GET');
+                const data = await apiRequest('/api/v1/notifications/recent', 'GET');
+                const recentNotifications = document.getElementById('recentNotifications');
                 recentNotifications.innerHTML = '';
 
-                if (data.data && data.data.length > 0) {
-                    data.data.forEach(notification => {
-                        const iconClass = notification.type === 'alert' ? 'fa-exclamation-triangle text-warning' :
-                                        notification.type === 'info' ? 'fa-info-circle text-primary' :
-                                        'fa-check-circle text-success';
-
+                if (data && data.length > 0) {
+                    data.forEach(notification => {
                         const notificationItem = document.createElement('div');
                         notificationItem.className = 'notification-item';
                         notificationItem.innerHTML = `
                             <div class="notification-icon">
-                                <i class="fas ${iconClass}"></i>
+                                <i class="fas ${notification.type === 'alert' ? 'fa-exclamation-triangle' :
+                                               notification.type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}"></i>
                             </div>
                             <div class="notification-content">
                                 <h4>${notification.title}</h4>
                                 <p>${notification.message}</p>
-                                <div class="notification-time">${formatNotificationTime(notification.created_at)}</div>
+                                <div class="notification-time">${notification.time}</div>
                             </div>
                         `;
                         recentNotifications.appendChild(notificationItem);
@@ -4143,19 +4175,6 @@
                 }
             } catch (error) {
                 // Fail silently for dashboard
-            }
-        }
-
-        // Format notification time
-        function formatNotificationTime(timestamp) {
-            const now = new Date();
-            const notificationDate = new Date(timestamp);
-            const diffHours = Math.floor((now - notificationDate) / (1000 * 60 * 60));
-
-            if (diffHours < 24) {
-                return notificationDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            } else {
-                return notificationDate.toLocaleDateString();
             }
         }
 
@@ -4188,6 +4207,8 @@
                     registerUser(userData);
                 });
             }
+
+
 
             // Login form
             if (loginForm) {
@@ -4409,19 +4430,13 @@
 
         // Initialize app
         async function initApp() {
-            console.log("Initializing app...");
-
             // Set theme from localStorage
             const savedTheme = localStorage.getItem('theme') || 'light';
             setTheme(savedTheme);
 
-            // Initialize emoji picker
-            initEmojiPicker();
-
             // Check server connection
             try {
                 await apiRequest('/api/v1/ping', 'GET');
-                console.log("Server is available");
             } catch (error) {
                 showNotification("Cannot connect to server. Please try again later.", "error");
                 return;
