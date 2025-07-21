@@ -2460,6 +2460,11 @@
                     </div>
 
                     <div class="form-group">
+                        <label for="categoryApp">App Name</label>
+                        <input type="text" id="categoryApp" class="form-control" placeholder="e.g., Media" required>
+                    </div>
+
+                    <div class="form-group">
                         <label>Icon</label>
                         <div class="emoji-picker" id="emojiPicker">
                             <!-- Emojis will be populated by JavaScript -->
@@ -3432,6 +3437,7 @@ async function loadCategories() {
                     saveButton.textContent = "Save Changes";
 
                     document.getElementById('categoryName').value = category.name;
+                    document.getElementById("App name").value = category.app_name;
                     document.getElementById('categoryRestricted').checked = category.restricted;
                     document.getElementById('timeLimit').value = category.time_limit;
 
